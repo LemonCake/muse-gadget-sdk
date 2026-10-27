@@ -38,7 +38,7 @@ static void overflow_input(muse_ptt_t type)
     assert(queue.n==16 && muse_input_call_epoch()==1);
 }
 static bool held, ready, ended_event, ready_event, hold_event, resume_event, notes_mode;
-static bool fail_read, fail_accept, hold_status, reply_done, terminate_task;
+static bool fail_read, fail_accept, hold_status, reply_done, working, terminate_task;
 static bool need_end, sleep_state, input_context;
 static int mic_at[128], speaker_at[128];
 static float level_at[128], level;
@@ -153,7 +153,7 @@ void muse_voice_call_ptt_status(muse_voice_call_ptt_status_t *s) {
     *s=(muse_voice_call_ptt_status_t){.connecting=!ready_event,.live=ready_event,.talking=held,
         .capture=held&&!need_end&&!hold_status,.hold=hold_status,
         .sending=delivered>0 && frame<(scenario==1?18:14),.heard=scenario==1,
-        .reply_done=reply_done};
+        .reply_done=reply_done,.working=working};
 }
 bool muse_voice_call_audio(const int16_t *p,size_t n) {
     assert(n==MUSE_AUDIO_CHUNK);
@@ -205,7 +205,7 @@ muse_voice_call_ev_t muse_voice_call_event(char *p,size_t n) {
     if (scenario>=12 && scenario<=14 && frame==4 && !ended_event) {
         ended_event=true; snprintf(p,n,"CALL ENDED"); return MUSE_VOICE_CALL_EV_ENDED;
     }
-    if (!ended_event && ((need_end && scenario!=7) || (frame>=(scenario==1?20:16) && scenario!=7) || (scenario==3 && frame==2))) {
+    if (!ended_event && ((need_end && scenario!=7) || (frame>=(scenario==1?22:16) && scenario!=7) || (scenario==3 && frame==2))) {
         ended_event=true; snprintf(p,n,"CALL ENDED"); return MUSE_VOICE_CALL_EV_ENDED;
     }
     return MUSE_VOICE_CALL_EV_NONE;
@@ -240,8 +240,9 @@ esp_err_t muse_audio_read(int16_t *p,size_t n) {
         if(frame==13) fail_read=true;
         if(frame==14) { fail_read=false; fail_accept=true; }
         if(frame==15) { fail_accept=false; push(MUSE_PTT_UP); }
-        if(frame==18) reply_done=true;
-        if(frame==19) push(MUSE_PTT_END_CALL);
+        if(frame==18) { reply_done=true; working=true; }   /* the reply ends; Muse's work goes on */
+        if(frame==19) working=false;
+        if(frame==21) push(MUSE_PTT_END_CALL);
     } else if(scenario==2 && frame==1) {
         push(MUSE_PTT_UP); push(MUSE_PTT_DOWN); push(MUSE_PTT_UP);
     } else if(scenario==4 && frame==2) atomic_store(&s_shutdown,true);
@@ -367,6 +368,7 @@ int main(int argc,char **argv) {
             call_view(v); assert(muse_voice_call_label() && muse_voice_call_hint());
             assert((mode==MUSE_MODE_LISTENING)==(v==MUSE_VOICE_VIEW_LISTENING));
             assert((mode==MUSE_MODE_SPEAKING)==(v==MUSE_VOICE_VIEW_SPEAKING));
+            if(v==MUSE_VOICE_VIEW_WORKING) assert(mode==MUSE_MODE_THINKING && !strcmp(muse_voice_call_label(),"WORKING"));
         }
         atomic_store(&s_call_view,MUSE_VOICE_VIEW_NONE);
         assert(!muse_voice_call_label() && !muse_voice_call_hint()); return 0;
@@ -470,7 +472,7 @@ int main(int argc,char **argv) {
         assert(mic_at[9] && !speaker_at[9] && views[9]==MUSE_VOICE_VIEW_LISTENING && level_at[9]==0.109f);
         assert(mic_at[10] && !mic_at[11] && mic_at[12]);
         assert(!mic_at[13] && !mic_at[14] && !level_at[13] && !level_at[14]);
-        assert(views[18]==MUSE_VOICE_VIEW_READY && ends==1);
+        assert(views[18]==MUSE_VOICE_VIEW_WORKING && views[19]==MUSE_VOICE_VIEW_READY && ends==1);
         assert(talk_edges==5 && !talk_values[2] && talk_values[3] && talk_times[2]==talk_times[3]);
     } else if(scenario==2) {
         assert(!held && !mic_at[1] && delivered>0 && delivered<=6 && !ends); /* UP retained; only bounded new-press tail */

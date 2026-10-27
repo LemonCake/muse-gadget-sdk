@@ -1742,6 +1742,7 @@ static void frame_tick(lv_timer_t *timer)
         .mode_t = mode_t,
         .level = s_level,
         .happy = muse_state_happiness(),
+        .working = muse_voice_call_view() == MUSE_VOICE_VIEW_WORKING ? 1.0f : 0,
     };
     if (!muse_board->epaper || mode != s_last_epaper_pose) {
         muse_pixel_render(&pose);

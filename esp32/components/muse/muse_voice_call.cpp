@@ -123,6 +123,7 @@ enum : uint32_t {
     ST_REPLY_LOST = 1u << 7,
     ST_ENDED = 1u << 8,
     ST_HEARD = 1u << 9,
+    ST_WORKING = 1u << 10,
 };
 
 struct call_ev_t {
@@ -723,6 +724,9 @@ static void publish(void)
             }
             if (muse_vc_reply_gate_playing(s_gate)) {
                 st |= ST_REPLY_OPEN;
+            }
+            if (muse_vc_call_working(&s_call)) {
+                st |= ST_WORKING;
             }
         }
         if ((connecting || s_call.state == MUSE_VC_LIVE) &&
@@ -1547,4 +1551,5 @@ extern "C" void muse_voice_call_ptt_status(muse_voice_call_ptt_status_t *out)
     out->reply_done = st & ST_REPLY_DONE;
     out->overflow = v_overflow;
     out->reply_lost = st & ST_REPLY_LOST;
+    out->working = st & ST_WORKING;
 }

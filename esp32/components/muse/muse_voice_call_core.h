@@ -136,6 +136,9 @@ typedef struct {
     muse_vc_span_t item_id;       /* SPEECH_*, INPUT_SUPPRESSED, TURN_STARTED */
     muse_vc_span_t submission_id; /* TURN_STARTED: submission_message_id */
     muse_vc_span_t response_message_id;              /* TURN_SETTLED */
+    /* TURN_SETTLED: async_handoffs_pending is exactly 0, so nothing in the
+     * call is still open. Absent from VMs that predate the field. */
+    bool handoffs_none;
     muse_vc_span_t mapper_response_id;               /* RESPONSE_CREATED, RESPONSE_DONE: response.id */
 } muse_vc_event_t;
 
@@ -446,6 +449,9 @@ void muse_vc_call_init(muse_vc_call_t *c, const muse_vc_limits_t *limits, muse_v
 void muse_vc_call_begin(muse_vc_call_t *c, const char *call_id, int64_t now_us);
 uint32_t muse_vc_call_head(muse_vc_call_t *c, int status, int64_t now_us);
 uint32_t muse_vc_call_event(muse_vc_call_t *c, const muse_vc_event_t *ev, int64_t now_us);
+/* A live call where Muse still has work open: a caller turn that hasn't
+ * settled. Muse waiting on the caller (a spoken approval) isn't working. */
+bool muse_vc_call_working(const muse_vc_call_t *c);
 /* Audible audio played or speech heard: the idle clock restarts. The idle
  * limit doesn't run while the input is held, the caller is mid-speech, or a
  * turn is active; max_us always applies. */

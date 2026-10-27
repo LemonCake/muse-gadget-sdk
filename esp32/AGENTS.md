@@ -533,6 +533,18 @@ builds, the DevKitC-1 default included, don't have the option and don't change.
   back, and older work arriving while a newer reply is still going is
   dropped. Approvals work by voice: Muse asks in the call and you hold to
   answer; the gadget has no approval card.
+- A push-to-talk call shows WORKING (the thinking avatar's working variant)
+  when nothing is playing or held but Muse still has a caller turn open
+  (`hatch.voice.turn_started` without its `turn_settled`; Jarvis keeps a
+  delegating turn open until its result has been spoken). A settlement with
+  `async_handoffs_pending` above 0 is a conversational boundary, such as a
+  spoken approval prompt, where Muse waits on the caller: READY, not WORKING.
+  One reporting exactly 0 retires every open turn, since Jarvis doesn't settle
+  each caller turn by name. `muse_vc_call_working()` decides it; talking,
+  Muse speaking and a pending reply still take precedence. The avatar gets
+  `muse_pose_t.working`: the default one types on a little keyboard with a
+  spinner beside its head in a warm scheme; an avatar that ignores the field
+  shows THINKING.
 - Nothing plays and the mic doesn't open until `hatch.voice.session` names this
   call's exact `call_id` and a `session_id`; a missing or wrong one fails the
   call. Before that, an `error` event fails it too; after, only `session_dead`

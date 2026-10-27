@@ -638,8 +638,11 @@ bool muse_vc_parse_event(const char *line, size_t len, muse_vc_event_t *ev)
         get_string(line, len, "submission_message_id", &ev->submission_id);
         get_string(line, len, "item_id", &ev->item_id);
     } else if (span_is(type, "hatch.voice.turn_settled")) {
+        muse_vc_span_t n;
         ev->kind = MUSE_VC_EV_TURN_SETTLED;
         get_string(line, len, "response_message_id", &ev->response_message_id);
+        ev->handoffs_none = get_checked(line, len, "async_handoffs_pending", &n) == MUSE_VC_J_NUMBER &&
+                            number_is(n, 0);
     } else if (span_is(type, "hatch.voice.input_suppressed")) {
         ev->kind = MUSE_VC_EV_INPUT_SUPPRESSED;
         get_string(line, len, "item_id", &ev->item_id);
@@ -1339,6 +1342,19 @@ static bool turn_started(muse_vc_turns_t *t, const muse_vc_event_t *ev, char ite
     return true;
 }
 
+/* Retires every active turn. */
+static void settle_all(muse_vc_turns_t *t)
+{
+    for (int i = 0; i < t->n_active; i++) {
+        t->settled[t->settled_next] = t->active[i];
+        t->settled_next = (uint8_t)((t->settled_next + 1) % MUSE_VC_MAX_TURNS);
+        if (t->n_settled < MUSE_VC_MAX_TURNS) {
+            t->n_settled++;
+        }
+    }
+    t->n_active = 0;
+}
+
 /* Retires the named submission and the earlier ones for its item. An unnamed
  * or unknown settlement retires nothing. Returns true if anything settled. */
 static bool turn_settled(muse_vc_turns_t *t, const muse_vc_event_t *ev)
@@ -1447,6 +1463,14 @@ uint32_t muse_vc_call_event(muse_vc_call_t *c, const muse_vc_event_t *ev, int64_
         if (turn_settled(c->turns, ev)) {
             muse_vc_call_activity(c, now_us);   /* a fresh idle window after it */
         }
+        if (ev->handoffs_none && c->turns->n_active) {
+            /* Jarvis settles with nothing pending only once every response and
+             * handoff in the call is done, and it doesn't settle every caller
+             * turn by name: a turn asked while a handoff ran would otherwise
+             * stay active (working, never idle) for the rest of the call. */
+            settle_all(c->turns);
+            muse_vc_call_activity(c, now_us);
+        }
         return 0;
     case MUSE_VC_EV_RESPONSE_CREATED:
     case MUSE_VC_EV_RESPONSE_DONE:     /* "cancelled" included: the call goes on */
@@ -1531,6 +1555,11 @@ uint32_t muse_vc_call_lost(muse_vc_call_t *c, int64_t now_us)
     c->state = MUSE_VC_IDLE;
     c->media_open = c->end_call_pending = c->end_call_open = false;
     return MUSE_VC_ACT_ENDED;
+}
+
+bool muse_vc_call_working(const muse_vc_call_t *c)
+{
+    return c->state == MUSE_VC_LIVE && c->turns->n_active;
 }
 
 uint32_t muse_vc_call_poll(muse_vc_call_t *c, int64_t now_us)
