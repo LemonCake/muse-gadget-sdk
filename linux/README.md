@@ -151,6 +151,13 @@ python -m pip install 'musegadget[voice]'
 musegadget voice-call --vm-id YOUR_VM_ID --live
 ```
 
+`--show-state` prints what the call is doing as it changes: `connecting`,
+`listening`, `speaking`, `working` and `ended`. `working` means Muse has
+answered something you asked that it is still on, such as a delegated task, and
+it doesn't hear you talking. A gadget built on the SDK gets the same from
+`VoiceCall.state` (a `CallState`) or the `on_state` callback, to drive a light
+or a screen.
+
 Half duplex is the default: microphone input is gated during audible playback
 and a short settling tail. Silent media does not mute the mic or extend idle
 life. `--full-duplex` disables this echo protection; use headphones or your own

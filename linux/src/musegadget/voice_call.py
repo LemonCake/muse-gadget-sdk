@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import enum
 import json
 import logging
 import math
@@ -32,6 +33,7 @@ import time
 import uuid
 from collections import deque
 from datetime import datetime, timedelta, timezone
+from typing import Callable, Optional
 from urllib.parse import urlencode
 
 from musegadget.noise import Header
@@ -49,6 +51,20 @@ SETTLE_SECONDS = 0.2
 MAX_TRACKED_TURNS = 64
 MAX_SETTLED_TURNS = 1024
 END_CALL_STOP_OFFER = {"type": "hatch.voice.capability.offer", "end_call_stop": 1}
+STATE_POLL_SECONDS = 0.05
+
+
+class CallState(str, enum.Enum):
+    """What a call is doing, for a gadget to show (``VoiceCall.state``)."""
+
+    CONNECTING = "connecting"  # admitted, not ready yet
+    LISTENING = "listening"    # the mic is open and Muse isn't talking or working
+    SPEAKING = "speaking"      # Muse's reply is audible
+    WORKING = "working"        # Muse answered and is still on a caller's request
+    ENDED = "ended"            # hanging up or over
+
+    def __str__(self) -> str:
+        return self.value
 
 
 def positive_seconds(value) -> float:
@@ -103,7 +119,8 @@ class VoiceCall:
                  half_duplex: bool = True,
                  mic_threshold: int = 0, idle_timeout: float = 45,
                  overall_timeout: float = 300, ready_timeout: float = 35,
-                 cleanup_timeout: float = 10) -> None:
+                 cleanup_timeout: float = 10,
+                 on_state: Optional[Callable[[CallState], None]] = None) -> None:
         if not 0 <= mic_threshold <= 32767:
             raise ValueError("mic threshold must be between 0 and 32767")
         self.session, self.device_id = session, device_id
@@ -138,6 +155,57 @@ class VoiceCall:
         self._playing_until = 0.0
         self._activity = time.monotonic()
         self._used = False
+        self._on_state = on_state
+        self._reported_state: CallState | None = None
+        self._ended = False
+        # The server hears the caller (speech started, without its stop yet).
+        self._caller_speaking = False
+        self._speaking_item: str | None = None
+        # The latest caller turn's reply hasn't finished: Muse is about to
+        # answer, not off working. Its reply is a response for its item, or
+        # one that names no turn (early media, older VMs).
+        self._awaiting_reply = False
+        self._reply_kept = False  # one nothing-pending settlement kept it already
+        self._reply_item: str | None = None
+        self._reply_responses: set[str] = set()
+        self._open_response: str | None = None  # created and not done
+        self._open_unmarked = False  # ...without a submission (early media)
+
+    @property
+    def state(self) -> CallState:
+        """WORKING once Muse has answered a caller turn that is still open,
+        such as a delegated task, while the caller isn't talking."""
+        if self._ended:
+            return CallState.ENDED
+        if not self.ready.is_set():
+            return CallState.CONNECTING
+        if self._audible_frames > 0 or time.monotonic() < self._playing_until:
+            return CallState.SPEAKING
+        if self._active_turns and not self._caller_speaking and not self._awaiting_reply:
+            return CallState.WORKING
+        return CallState.LISTENING
+
+    def _report_state(self) -> None:
+        state = self.state
+        if state == self._reported_state or self._on_state is None:
+            self._reported_state = state
+            return
+        self._reported_state = state
+        try:
+            self._on_state(state)
+        except Exception as exc:
+            log.warning("voice state callback failed (%s)", type(exc).__name__)
+
+    async def _watch_state(self) -> None:
+        while True:
+            self._report_state()
+            await asyncio.sleep(STATE_POLL_SECONDS)
+
+    def _caller_stopped(self, event: dict) -> None:
+        item = identifier(event.get("item_id"))
+        if self._speaking_item is None or item is None or item == self._speaking_item:
+            self._caller_speaking = False
+            self._speaking_item = None
 
     async def run(self, source, output, *, realtime_input: bool = False) -> str:
         """Run until remote stop/EOF, idle/overall deadline, or cancellation.
@@ -159,7 +227,8 @@ class VoiceCall:
             tasks = [asyncio.create_task(self._receive()),
                      asyncio.create_task(self._input(source, realtime_input)),
                      asyncio.create_task(self._play()),
-                     asyncio.create_task(self._watchdog())]
+                     asyncio.create_task(self._watchdog()),
+                     asyncio.create_task(self._watch_state())]
             done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
             # Prefer a real failure when EOF and another task finish together.
             for task in done:
@@ -170,6 +239,8 @@ class VoiceCall:
             raise
         finally:
             self._remote_ended = True  # Invalidate queued input before shutdown's first await.
+            self._ended = True  # hanging up now, whatever cleanup reports
+            self._report_state()
 
             async def shutdown():
                 # Shield the entire shutdown, including asynchronous source
@@ -283,8 +354,45 @@ class VoiceCall:
             if len(self._active_turns) >= MAX_TRACKED_TURNS:
                 raise ValueError("too many active voice turns")
             self._active_turns[message_id] = item_id
+            if self._speaking_item is not None and item_id == self._speaking_item:
+                self._caller_speaking = False
+                self._speaking_item = None
+            seen = item_id in self._settled_turns.values() or any(
+                item == item_id for key, item in self._active_turns.items() if key != message_id)
+            if item_id != self._reply_item and not seen:
+                # A new caller turn. A delayed reply's turn names an earlier
+                # item; early media the reply adopts was created unmarked.
+                self._awaiting_reply = True
+                self._reply_kept = False
+                self._reply_item = item_id
+                self._reply_responses = (
+                    {self._open_response} if self._open_response and self._open_unmarked else set())
             self._activity = time.monotonic()
             return True
+        pending = event.get("async_handoffs_pending")
+        if (isinstance(pending, int) and not isinstance(pending, bool) and pending == 0
+                and self._active_turns):
+            # Jarvis settles with nothing pending only once every response and
+            # handoff in the call is done, and it doesn't settle each caller
+            # turn by name: retire them all, or one asked while a handoff ran
+            # would stay active (working, never idle) for the rest of the call.
+            # The latest caller turn stays while its reply hasn't finished (an
+            # interrupted reply's settlement can arrive after it started), but
+            # only once, so a reply never seen can't hold the call open.
+            keep = self._reply_item if self._awaiting_reply and not self._reply_kept else None
+            if keep is not None:
+                self._reply_kept = True
+            else:
+                self._awaiting_reply = False
+            done = {key: item for key, item in self._active_turns.items() if item != keep}
+            if done:
+                if len(self._settled_turns) + len(done) > MAX_SETTLED_TURNS:
+                    raise ValueError("too many settled voice turns")
+                self._settled_turns.update(done)
+                for key in done:
+                    del self._active_turns[key]
+                self._activity = time.monotonic()
+                return True
         message_id = identifier(event.get("response_message_id"))
         if message_id is None:
             return False  # An unidentified settlement cannot retire newer work.
@@ -336,8 +444,18 @@ class VoiceCall:
                 if self.held != event["held"]:
                     self._mic_epoch += 1
                 self.held = event["held"]
+                if self.held:
+                    self._caller_speaking = False  # its stop may never come
+                    self._speaking_item = None
             elif kind == "input_audio_buffer.speech_started":
                 self._activity = time.monotonic()
+                item = identifier(event.get("item_id"))
+                if item is None or item not in self._reply_gate.items:
+                    # A repeated start for an older item is stale (as in the gate).
+                    self._caller_speaking = True
+                    self._speaking_item = item
+            elif kind in ("input_audio_buffer.speech_stopped", "hatch.voice.input_suppressed"):
+                self._caller_stopped(event)
             elif kind == "conversation.item.added":
                 item = event.get("item")
                 control_id = item.get("call_id") if isinstance(item, dict) else None
@@ -360,6 +478,24 @@ class VoiceCall:
                 # A response (including cancelled/failed) is NOT the call and
                 # does not settle a caller turn's asynchronous work.
                 self._activity = time.monotonic()
+                response = event.get("response")
+                response_id = identifier(response.get("id")) if isinstance(response, dict) else None
+                if kind == "response.created":
+                    submission = (identifier(response.get("submission_message_id"))
+                                  if isinstance(response, dict) else None)
+                    self._open_response, self._open_unmarked = response_id, submission is None
+                    if (self._awaiting_reply and response_id is not None
+                            and len(self._reply_responses) < MAX_TRACKED_TURNS
+                            and (submission is None
+                                 or self._active_turns.get(submission) == self._reply_item)):
+                        self._reply_responses.add(response_id)
+                elif response_id is not None:
+                    if response_id == self._open_response:
+                        self._open_response = None
+                    if self._awaiting_reply and response_id in self._reply_responses:
+                        # Only the turn's own reply answers it; an older one the
+                        # caller interrupted, or older work, finishing doesn't.
+                        self._awaiting_reply = False
             was_waiting = self._reply_gate.waiting
             self._reply_gate.event(event)
             self._apply_reply_flush()
@@ -428,6 +564,9 @@ class VoiceCall:
         response_id = self._reply_gate.open_response
         self._reply_gate.interrupt()
         self._apply_reply_flush()
+        # The caller takes the floor: LISTENING until the server hears them stop.
+        self._caller_speaking = True
+        self._speaking_item = None
         if response_id and not self._remote_ended:
             try:
                 await asyncio.wait_for(self._event({"type": "response.cancel",

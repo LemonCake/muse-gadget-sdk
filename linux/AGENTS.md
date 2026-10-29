@@ -203,6 +203,25 @@ never has a command's parameters, output or error message.
   Only a matching settlement retires that input item's work through the matched
   submission, not newer aliases or unrelated inputs. Keep identity storage
   bounded, restart idle after settlement, and never suspend the overall timer.
+- A settlement with `async_handoffs_pending` exactly 0 retires every open
+  turn: no handoff in the call remains, and Jarvis doesn't settle each caller
+  turn by name. The latest caller turn stays while its reply hasn't finished
+  (an interrupted reply's settlement can arrive after it started), once.
+- `VoiceCall.state` and the optional `on_state` callback tell a gadget what to
+  show (`CallState`): CONNECTING until readiness, SPEAKING while reply audio
+  is audible, WORKING once Muse has answered a caller turn that is still open
+  (`hatch.voice.turn_started` without its settlement, such as a delegated
+  task) and the server doesn't hear the caller, and LISTENING otherwise, then
+  ENDED as soon as the call starts hanging up. A caller turn for a new input
+  item counts only once its reply is done: a response whose
+  `response.submission_message_id` names a turn for its item, or one naming
+  none (early media the turn adopts, older VMs). An ordinary exchange, an
+  older reply the caller interrupted, or older work never shows WORKING; a
+  delayed reply's turn names an earlier item. `barge_in()`, a speech start and an
+  input hold settle who has the floor. The callback runs on the event loop, so
+  it must return quickly (no blocking I/O); the state is sampled every 50 ms
+  and reported on changes, so a shorter state can be missed. A failing
+  callback is logged and ignored. `--show-state` prints them.
 - A validated end-call ACK is not undone by a delayed media EOF if a bounded
   stream reset succeeds; report the incomplete drain separately.
 - Tests use self-authored tones/zeros and synthetic identities only. Never put

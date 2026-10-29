@@ -203,6 +203,8 @@ def cmd_voice_call(args: argparse.Namespace) -> int:
                 half_duplex=not args.full_duplex,
                 mic_threshold=args.mic_threshold, idle_timeout=args.idle_timeout,
                 overall_timeout=args.overall_timeout,
+                on_state=(lambda state: print(f"Call: {state.value}.", flush=True))
+                if args.show_state else None,
             )
             return await call.run(audio.frames(), audio, realtime_input=args.live)
         finally:
@@ -317,6 +319,8 @@ def main(argv: list[str] | None = None) -> int:
     voice.add_argument("--overall-timeout", type=positive_seconds, default=300,
                        help="maximum call seconds (default: %(default)s)")
     voice.add_argument("--thread-id", help="target thread, otherwise the primary thread")
+    voice.add_argument("--show-state", action="store_true",
+                       help="print what the call is doing: listening, speaking, working")
     voice.set_defaults(func=cmd_voice_call)
 
     sub.add_parser("info", help="show device identity").set_defaults(func=cmd_info)
