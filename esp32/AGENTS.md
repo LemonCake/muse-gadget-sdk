@@ -540,8 +540,13 @@ builds, the DevKitC-1 default included, don't have the option and don't change.
   delegating turn open until its result has been spoken). A settlement with
   `async_handoffs_pending` above 0 is a conversational boundary, such as a
   spoken approval prompt, where Muse waits on the caller: READY, not WORKING.
-  One reporting exactly 0 retires every open turn, since Jarvis doesn't settle
-  each caller turn by name. `muse_vc_call_working()` decides it; talking,
+  One reporting exactly 0 retires every open turn, since Jarvis doesn't
+  settle each caller turn by name, except the latest caller turn while its
+  reply hasn't finished (an interrupted reply's settlement can arrive after
+  the next caller turn started), and that only once. Its reply is a response
+  whose `response.submission_message_id` names a turn for its item, or one
+  that names none (early media the turn adopts, older VMs); older work's
+  responses don't count. `muse_vc_call_working()` decides it; talking,
   Muse speaking and a pending reply still take precedence. On a hands-free
   call it waits for the turn's first reply to finish (before that the call
   shows LISTENING, as it always has), the mic stays open while it shows, and

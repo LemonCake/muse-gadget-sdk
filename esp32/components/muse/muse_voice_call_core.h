@@ -140,6 +140,9 @@ typedef struct {
      * call is still open. Absent from VMs that predate the field. */
     bool handoffs_none;
     muse_vc_span_t mapper_response_id;               /* RESPONSE_CREATED, RESPONSE_DONE: response.id */
+    /* RESPONSE_CREATED: response.submission_message_id, the caller turn the
+     * response answers (absent for early or trailing media, older VMs). */
+    muse_vc_span_t response_submission_id;
 } muse_vc_event_t;
 
 /* False for a line that isn't one JSON object with a string "type". */
@@ -439,10 +442,15 @@ typedef struct {
     bool held;
     bool speaking;             /* the server heard speech start and no end yet */
     char speaking_item[MUSE_VC_TURN_ID_MAX];   /* the item speech started on ("" if unnamed) */
-    /* A caller turn for a new item opened and no response has finished since:
-     * Muse is about to answer, not off working (hands-free WORKING waits). */
+    /* A caller turn for a new item opened and its reply hasn't finished: Muse
+     * is about to answer, not off working (hands-free WORKING waits, and one
+     * nothing-pending settlement keeps that turn). */
     bool awaiting_reply;
+    bool reply_kept;                            /* one settlement kept it already */
     char reply_item[MUSE_VC_TURN_ID_MAX];
+    char reply_response[MUSE_VC_TURN_ID_MAX];   /* its reply: the latest response for it */
+    char open_response[MUSE_VC_TURN_ID_MAX];    /* the response created and not done */
+    bool open_unmarked;                         /* ...without a submission (early media) */
     uint32_t advisory_errors;
     muse_vc_end_t reason;
 } muse_vc_call_t;

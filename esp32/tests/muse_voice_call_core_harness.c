@@ -558,6 +558,10 @@ static void unit_lifecycle(void)
     SETTLED_PENDING("w2", "0.5");
     SETTLED("w2");                       /* no field: as before */
     assert(c.turns->n_active == 1);
+    SETTLED_PENDING("w9", "0");          /* w3 has no reply yet: it stays */
+    assert(c.turns->n_active == 1);
+    feed(&c, "{\"type\":\"response.created\",\"event_id\":\"e\",\"response\":{\"id\":\"rw3\"}}", now);
+    feed(&c, "{\"type\":\"response.done\",\"event_id\":\"e\",\"response\":{\"id\":\"rw3\"}}", now);
     SETTLED_PENDING("w9", "0");          /* nothing pending: w3 retires too */
     assert(c.turns->n_active == 0 && !muse_vc_call_working(&c));
     t = now;
