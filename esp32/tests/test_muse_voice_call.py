@@ -343,7 +343,7 @@ class VoiceCallSession(unittest.TestCase):
              'ptt_bad_turn_identity', 'ptt_playing_while_waiting', 'ptt_captions', 'ptt_end_while_held_reply',
              'ptt_end_mid_pump', 'ptt_stop_drains_deferred', 'ptt_stop_discards_ineligible',
              'ptt_stop_paced_ack_only', 'ptt_stop_paced_ack_eof', 'ptt_stop_paced_eof_ack', 'ptt_stop_paced_output_only',
-             'ptt_stop_no_progress_deadline', 'ptt_stop_paced_interrupts']
+             'ptt_stop_no_progress_deadline', 'ptt_stop_paced_interrupts', 'hands_free_working']
 
     @classmethod
     def setUpClass(cls):
@@ -424,6 +424,9 @@ class VoiceCallSession(unittest.TestCase):
 
     def test_ptt_older_work_reports_back_after_the_current_reply(self):
         self.run_case('ptt_gate_follow_up')
+
+    def test_hands_free_shows_working_while_muse_is_on_it(self):
+        self.run_case('hands_free_working')
 
     def test_ptt_reply_done_is_the_current_replys_own(self):
         self.run_case('ptt_stale_completion')

@@ -725,14 +725,18 @@ static void publish(void)
             if (muse_vc_reply_gate_playing(s_gate)) {
                 st |= ST_REPLY_OPEN;
             }
-            if (muse_vc_call_working(&s_call)) {
-                st |= ST_WORKING;
-            }
         }
         if ((connecting || s_call.state == MUSE_VC_LIVE) &&
             (s_talk || s_tail_left || xStreamBufferBytesAvailable(s_in) || s_mic_off < s_mic_len)) {
             st |= ST_SENDING;
         }
+    }
+    /* Muse has a caller turn open. Hands-free, only once its first reply is
+     * done and while the server doesn't hear the caller; push-to-talk gates
+     * those on the voice task (holding, awaiting). */
+    if (!s_pending_gen && muse_vc_call_working(&s_call) &&
+        (s_ptt || (!s_call.speaking && !s_call.awaiting_reply))) {
+        st |= ST_WORKING;
     }
     s_status.store((gen << 16) | st);
 }
@@ -1524,6 +1528,12 @@ extern "C" muse_voice_call_ev_t muse_voice_call_event(char *text, size_t cap)
         }
     }
     return MUSE_VOICE_CALL_EV_NONE;
+}
+
+extern "C" bool muse_voice_call_working(void)
+{
+    uint32_t st;
+    return s_inited && status_mine(&st) && !(st & ST_ENDED) && (st & ST_WORKING);
 }
 
 extern "C" void muse_voice_call_ptt_status(muse_voice_call_ptt_status_t *out)

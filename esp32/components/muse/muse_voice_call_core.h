@@ -439,6 +439,10 @@ typedef struct {
     bool held;
     bool speaking;             /* the server heard speech start and no end yet */
     char speaking_item[MUSE_VC_TURN_ID_MAX];   /* the item speech started on ("" if unnamed) */
+    /* A caller turn for a new item opened and no response has finished since:
+     * Muse is about to answer, not off working (hands-free WORKING waits). */
+    bool awaiting_reply;
+    char reply_item[MUSE_VC_TURN_ID_MAX];
     uint32_t advisory_errors;
     muse_vc_end_t reason;
 } muse_vc_call_t;

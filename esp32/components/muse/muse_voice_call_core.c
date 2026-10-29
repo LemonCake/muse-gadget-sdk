@@ -1456,6 +1456,11 @@ uint32_t muse_vc_call_event(muse_vc_call_t *c, const muse_vc_event_t *ev, int64_
             c->speaking = false;
             c->speaking_item[0] = '\0';
         }
+        if (strcmp(item, c->reply_item) != 0) {
+            /* A new caller turn; a delayed reply's turn names the same item. */
+            c->awaiting_reply = true;
+            memcpy(c->reply_item, item, sizeof(c->reply_item));
+        }
         muse_vc_call_activity(c, now_us);
         return 0;
     }
@@ -1472,8 +1477,11 @@ uint32_t muse_vc_call_event(muse_vc_call_t *c, const muse_vc_event_t *ev, int64_
             muse_vc_call_activity(c, now_us);
         }
         return 0;
-    case MUSE_VC_EV_RESPONSE_CREATED:
     case MUSE_VC_EV_RESPONSE_DONE:     /* "cancelled" included: the call goes on */
+        c->awaiting_reply = false;
+        muse_vc_call_activity(c, now_us);
+        return 0;
+    case MUSE_VC_EV_RESPONSE_CREATED:
     case MUSE_VC_EV_REPLY_TEXT:
     case MUSE_VC_EV_REPLY_DONE:
     case MUSE_VC_EV_USER_TEXT:

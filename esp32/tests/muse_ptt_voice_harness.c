@@ -149,6 +149,7 @@ void muse_voice_call_end(void) {
     assert(!input_context);
     ++ends; need_end=true; held=false;
 }
+bool muse_voice_call_working(void) { return working; }
 void muse_voice_call_ptt_status(muse_voice_call_ptt_status_t *s) {
     *s=(muse_voice_call_ptt_status_t){.connecting=!ready_event,.live=ready_event,.talking=held,
         .capture=held&&!need_end&&!hold_status,.hold=hold_status,
@@ -247,6 +248,11 @@ esp_err_t muse_audio_read(int16_t *p,size_t n) {
         push(MUSE_PTT_UP); push(MUSE_PTT_DOWN); push(MUSE_PTT_UP);
     } else if(scenario==4 && frame==2) atomic_store(&s_shutdown,true);
     else if(scenario==5 && frame==2) push(MUSE_PTT_DOWN);
+    else if(scenario==42) {   /* hands-free: Muse works on a turn, then is done */
+        if(frame==4) working=true;
+        if(frame==6) working=false;
+        if(frame==8) push(MUSE_PTT_END_CALL);
+    }
     else if(scenario==6 && frame==2) push(MUSE_PTT_UP);
     else if(scenario==7 && frame==2) { push(MUSE_PTT_END_CALL); clock_us+=20000000; }
     else if(scenario>=12 && scenario<=14 && frame==3) push(MUSE_PTT_UP);
@@ -459,7 +465,7 @@ int main(int argc,char **argv) {
         assert(!starts && !muse_voice_in_call());
         return 0;
     }
-    run_call(scenario!=5, 0);
+    run_call(scenario!=5 && scenario!=42, 0);
     assert(starts==1 && !muse_voice_in_call() && !muse_voice_ptt_call());
     assert(level==0 && !allocations && !notes);
     if(scenario==1) {
@@ -480,6 +486,10 @@ int main(int argc,char **argv) {
         assert(!ends); /* remote error/end is terminal */
     } else if(scenario==4 || scenario==5 || scenario==7) {
         assert(ends==1);
+    } else if(scenario==42) {
+        assert(views[3]==MUSE_VOICE_VIEW_LISTENING && views[4]==MUSE_VOICE_VIEW_WORKING);
+        assert(views[5]==MUSE_VOICE_VIEW_WORKING && views[6]==MUSE_VOICE_VIEW_LISTENING && ends==1);
+        assert(mic_at[4] && mic_at[5]);   /* the mic stays open while Muse works */
     } else if(scenario==6) {
         assert(mic_at[1] && mic_at[2] && mic_at[3] && mic_at[4] && !mic_at[5] && delivered==4);
         assert(talk_edges==1 && !talk_values[0] && talk_times[0]==180000); /* startup UP tail */
