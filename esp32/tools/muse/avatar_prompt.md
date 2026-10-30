@@ -43,6 +43,7 @@ API (muse_pixel.h, unchanged; implement exactly these)
       float working;  // 0 or 1, only in THINKING: Muse is busy on a call's work
   } muse_pose_t;
   uint32_t muse_pixel_accent(muse_mode_t mode);    // 0xRRGGBB accent for the UI around the avatar
+  uint32_t muse_pixel_working_accent(void);       // optional: accent while pose->working; 0 keeps THINKING's
   void muse_pixel_render(const muse_pose_t *pose); // draw one frame into the 64x64 grid
   void muse_pixel_set_size(int px);                // screen size the grid is scaled to, capped at 512
   void muse_pixel_scale(uint16_t *dst, int stride_px, int x0, int x1, int y0, int y1);

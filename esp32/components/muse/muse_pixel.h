@@ -45,6 +45,11 @@ typedef struct {
 /* Accent colour of a mode (for the surrounding UI), as 0xRRGGBB. */
 uint32_t muse_pixel_accent(muse_mode_t mode);
 
+/* Optional: the accent of the working pose (pose->working), as 0xRRGGBB, so
+ * the UI around the avatar matches it. 0, or a renderer without it (the UI
+ * links a weak default), keeps THINKING's accent. */
+uint32_t muse_pixel_working_accent(void);
+
 /* Render one frame into Muse's own MUSE_PX_W x MUSE_PX_H grid. */
 void muse_pixel_render(const muse_pose_t *pose);
 

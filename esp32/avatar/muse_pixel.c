@@ -188,6 +188,11 @@ uint32_t muse_pixel_accent(muse_mode_t mode)
     return SCHEMES[mode < MUSE_MODE_COUNT ? mode : MUSE_MODE_IDLE].acc;
 }
 
+uint32_t muse_pixel_working_accent(void)
+{
+    return WORKING_SCHEME.acc;
+}
+
 static void update_palette(const scheme_t *target, float dt)
 {
     rgb_t tgt[5];
